@@ -11,7 +11,7 @@ import logging
 import re
 import html
 from requests import Session
-from unstructured.partition.pdf import partition_pdf
+
 from database import get_db
 import pdfplumber
 from io import BytesIO  # Importing BytesIO for handling file content
@@ -653,57 +653,4 @@ def clean_extracted_text(text: str) -> str:
     clean_text = re.sub(r'\n{2,}', '\n\n', clean_text).strip()
     
     return clean_text
-
-@router.post("/pdf_to_text/")
-async def pdf_to_text(
-    file: UploadFile = File(...),
-    current_user: UserResponse = Depends(get_current_user)
-):
-    """
-    Converts a PDF file to plain text using a combination of unstructured and pdfplumber.
-    """
-    logger = logging.getLogger("pdf_to_text")
-    logger.info("Received a PDF conversion request.")
-
-    if file.content_type != "application/pdf":
-        logger.error(f"Invalid file type: {file.content_type}")
-        raise HTTPException(status_code=400, detail="Invalid file type. Only PDFs are allowed.")
-
-    try:
-        pdf_content = await file.read()
-        pdf_stream = BytesIO(pdf_content)
-
-        # Extract text using unstructured
-        try:
-            elements = partition_pdf(file=pdf_stream)
-            unstructured_text = "\n".join(element.text for element in elements if element.text)
-            logger.info("Extracted text using unstructured.")
-        except Exception as e:
-            logger.warning(f"Error using unstructured: {str(e)}")
-            unstructured_text = ""
-
-        # Reset the stream for further processing
-        pdf_stream.seek(0)
-
-        # Extract text using pdfplumber
-        try:
-            with pdfplumber.open(pdf_stream) as pdf:
-                pdfplumber_text_pages = [page.extract_text() for page in pdf.pages]
-                pdfplumber_text = "\n\n".join(pdfplumber_text_pages) if pdfplumber_text_pages else ""
-                logger.info(f"Extracted {len(pdf.pages)} pages using pdfplumber.")
-        except Exception as e:
-            logger.warning(f"Error using pdfplumber: {str(e)}")
-            pdfplumber_text = ""
-
-        # Combine and clean the extracted text
-        combined_text = f"[unstructured Output]\n{unstructured_text}\n\n[pdfplumber Output]\n{pdfplumber_text}".strip()
-        combined_text = clean_extracted_text(combined_text)
-
-        logger.info("Successfully combined text extraction results.")
-        return {"text": combined_text}
-
-    except Exception as e:
-        logger.error("Error while reading PDF", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error while reading PDF: {str(e)}")
-
 
