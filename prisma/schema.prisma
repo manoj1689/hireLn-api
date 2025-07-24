@@ -1,0 +1,614 @@
+generator client {
+  provider = "prisma-client-py"
+  enable_experimental_decimal = true
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                  String     @id @default(cuid())
+  email               String     @unique
+  firstName           String
+  lastName            String
+  password            String
+  avatar              String?
+  role                UserRole   @default(RECRUITER)
+
+  // Company Information
+  companyName         String?
+  companySize         String?
+  industry            String?
+  hiringVolume        String?
+  primaryHiringNeeds  String[]
+
+  // Trial and Subscription
+  trialEndsAt         DateTime?
+  isTrialActive       Boolean    @default(true)
+  subscriptionActive  Boolean    @default(false)
+
+  // Payment Information (via Stripe or similar)
+  paymentCustomerId   String?    // From Stripe or other provider
+  billingAddress      String?
+  city                String?
+  zipCode             String?
+  termsAgreement      Boolean    @default(false)
+
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  // Relations
+  jobs                Job[]
+  applications        Application[]
+  interviews          Interview[]
+  settings            UserSettings?
+  company             Company?
+
+  @@map("users")
+}
+
+model UserSettings {
+  id                        String   @id @default(cuid())
+  userId                    String   @unique
+  user                      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // General Settings
+  language                  String   @default("en-US")
+  timezone                  String   @default("UTC")
+  dateFormat                String   @default("MM/DD/YYYY")
+  autoSave                  Boolean  @default(true)
+  
+  // Email Settings
+  emailDailyDigest          Boolean  @default(true)
+  emailNewCandidateAlerts   Boolean  @default(true)
+  emailMarketingEmails      Boolean  @default(false)
+  
+  // Notification Settings
+  emailNewApplications      Boolean  @default(true)
+  pushNewApplications       Boolean  @default(true)
+  emailInterviewReminders   Boolean  @default(true)
+  pushInterviewReminders    Boolean  @default(true)
+  emailTaskDeadlines        Boolean  @default(true)
+  pushTaskDeadlines         Boolean  @default(false)
+  emailProductUpdates       Boolean  @default(true)
+  pushProductUpdates        Boolean  @default(false)
+  emailSecurityAlerts       Boolean  @default(true)
+  pushSecurityAlerts        Boolean  @default(true)
+  
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  @@map("user_settings")
+}
+
+model Company {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  name                  String
+  description           String?
+  industry              String?
+  founded               Int?
+  companySize           String?
+  website               String?
+  email                 String?
+  phone                 String?
+  taxId                 String?
+  logo                  String?
+  coverImage            String?
+  primaryColor          String   @default("#10b981")
+  secondaryColor        String   @default("#3b82f6")
+  careerHeadline        String?
+  careerDescription     String?
+  featuredImages        Json?
+  socialMedia           Json?
+  remoteWorkPolicy      String?
+  remoteHiringRegions   String[]
+  
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  
+  // Relations
+  locations             CompanyLocation[]
+  teamMembers           TeamMember[]
+  subscription          Subscription?
+  paymentMethods        PaymentMethod[]
+  billingAddress        BillingAddress?
+  invoices              Invoice[]
+
+  @@map("companies")
+}
+
+model CompanyLocation {
+  id              String   @id @default(cuid())
+  companyId       String
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  name            String
+  type            String   @default("office")
+  address         String
+  city            String
+  state           String?
+  country         String
+  zipCode         String?
+  phone           String?
+  email           String?
+  isHeadquarters  Boolean  @default(false)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("company_locations")
+}
+
+model TeamMember {
+  id          String    @id @default(cuid())
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  name        String
+  email       String
+  role        String
+  department  String
+  phone       String?
+  avatar      String?
+  status      String    @default("active")
+  accessLevel String    @default("member")
+  invitedAt   DateTime?
+  joinedAt    DateTime?
+  invitedBy   String?
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([email, companyId])
+  @@map("team_members")
+}
+
+model Subscription {
+  id                    String   @id @default(cuid())
+  companyId             String   @unique
+  company               Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  planName              String
+  planPrice             Decimal  @db.Decimal(10, 2)
+  billingCycle          String   @default("monthly")
+  status                String   @default("active")
+  currentPeriodStart    DateTime
+  currentPeriodEnd      DateTime
+  cancelAtPeriodEnd     Boolean  @default(false)
+  stripeSubscriptionId  String?
+  stripeCustomerId      String?
+  teamMemberLimit       Int      @default(25)
+  aiCreditsLimit        Int      @default(1000)
+  storageLimit          Int      @default(10)
+  
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  
+  // Relations
+  addons                SubscriptionAddon[]
+
+  @@map("subscriptions")
+}
+
+model PaymentMethod {
+  id                    String   @id @default(cuid())
+  companyId             String
+  company               Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  type                  String   @default("card")
+  last4                 String
+  brand                 String
+  expiryMonth           Int
+  expiryYear            Int
+  isDefault             Boolean  @default(false)
+  stripePaymentMethodId String?
+  
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@map("payment_methods")
+}
+
+model BillingAddress {
+  id            String   @id @default(cuid())
+  companyId     String   @unique
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  contactName   String
+  contactEmail  String
+  contactPhone  String?
+  companyName   String
+  addressLine1  String
+  addressLine2  String?
+  city          String
+  state         String?
+  zipCode       String
+  country       String
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("billing_addresses")
+}
+
+model Invoice {
+  id              String    @id @default(cuid())
+  companyId       String
+  company         Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  invoiceNumber   String    @unique
+  amount          Decimal   @db.Decimal(10, 2)
+  currency        String    @default("USD")
+  status          String    @default("pending")
+  dueDate         DateTime
+  paidAt          DateTime?
+  stripeInvoiceId String?
+  downloadUrl     String?
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("invoices")
+}
+
+model SubscriptionAddon {
+  id             String       @id @default(cuid())
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  
+  name           String
+  description    String?
+  price          Decimal      @db.Decimal(10, 2)
+  billingCycle   String       @default("monthly")
+  isActive       Boolean      @default(true)
+  
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@map("subscription_addons")
+}
+
+model RegistrationSession {
+  id                String    @id @default(cuid())
+  sessionId         String    @unique
+  step              Int       @default(1)
+  basicInfo         Json?     // Store step 1 data
+  companyDetails    Json?     // Store step 2 data
+  paymentInfo       Json?     // Store step 3 data (encrypted)
+  expiresAt         DateTime
+  createdAt         DateTime  @default(now())
+  
+  @@map("registration_sessions")
+}
+
+model JobSession {
+  id                String    @id @default(cuid())
+  sessionId         String    @unique
+  step              Int       @default(1)
+  basicInfo         Json?     // Store step 1 data
+  jobDetails        Json?     // Store step 2 data
+  requirements      Json?     // Store step 3 data
+  publishOptions    Json?     // Store step 4 data
+  expiresAt         DateTime
+  createdAt         DateTime  @default(now())
+  
+  @@map("job_sessions")
+}
+
+enum SalaryPeriod {
+  yearly
+  monthly
+  weekly
+  hourly
+}
+
+model Job {
+  id                   String         @id @default(cuid())
+  title                String
+  department           String
+  location             String
+  employmentType       EmploymentType
+  salaryMin            Int
+  salaryMax            Int
+  salaryPeriod         SalaryPeriod
+
+  description          String
+  responsibilities     String[]
+  requirements         String[]       // ✅ Added field
+  experience           String?
+  teamSize             String?
+  reportingStructure   String?
+
+  skills               String[]
+  education            String?
+  certifications       String[]
+  languages            Json
+  softSkills           String[]
+
+  isRemote             Boolean        @default(false)
+  isHybrid             Boolean        @default(false)
+
+  internalJobBoard     Boolean        @default(false)
+  externalJobBoards    Boolean        @default(true)
+  socialMedia          Boolean        @default(false)
+
+  applicationFormFields Json?
+
+  status               JobStatus      @default(DRAFT)
+  publishedAt          DateTime?
+  closedAt             DateTime?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  userId               String
+  user                 User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  applications         Application[]
+  interviews           Interview[]
+  @@map("jobs")
+}
+
+model Candidate {
+  id                String   @id @default(cuid())
+  email             String   @unique
+  name              String
+  phone             String?
+  resume            String?
+  portfolio         String?
+  linkedin          String?
+  github            String?
+  skills            String[]
+  experience        String?
+  education         String?
+  location          String?
+  salaryExpectation Int?
+
+  // ✅ New fields
+  applicationStatus String?   // e.g., "APPLIED", "REJECTED", etc.
+  interviewStatus   String?   // e.g., "SCHEDULED", "COMPLETED", etc.
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  applications      Application[]
+  interviews        Interview[]
+
+  @@map("candidates")
+}
+
+model Application {
+  id           String            @id @default(cuid())
+  jobId        String
+  candidateId  String
+  coverLetter  String?
+  status       ApplicationStatus @default(APPLIED)
+  matchScore   Int?
+  notes        String?
+  
+  appliedAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  // Relations
+  job          Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  candidate    Candidate         @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId       String
+  interviews   Interview[]
+
+  @@unique([jobId, candidateId])
+  @@map("applications")
+}
+
+model Interview {
+  id            String          @id @default(cuid())
+  scheduledById String
+  
+  // Interview Details
+  type          InterviewType
+  status        InterviewStatus @default(SCHEDULED)
+  scheduledAt   DateTime
+  duration      Int             @default(60) // minutes
+  timezone      String          @default("UTC")
+  
+  // Meeting Details
+  meetingLink   String?
+  location      String?
+  notes         String?
+  
+  // Interviewers (JSON array)
+  interviewers  Json?           // Array of interviewer objects
+
+  // Join token for secure access
+  joinToken     String?         // Token to join the interview
+  tokenExpiry   DateTime?       // Token expiration time
+  
+  // Email notification tracking
+  invitationSent Boolean        @default(false) // Track if invitation email was sent
+  
+  // Feedback
+  feedback      Json?           // Structured feedback object
+  rating        Int?            // Overall rating 1-5
+  recommendation String?        // HIRE, NO_HIRE, MAYBE
+  
+  // Timestamps
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  startedAt         DateTime?       // When interview actually started
+  completedAt       DateTime?       // When interview was completed
+
+  // Relations
+  candidateId         String
+  candidate           Candidate         @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  applicationId       String
+  application         Application       @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  jobId               String
+  job                 Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  userId              String
+  user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questions           Question[]
+  answers             Answer[]
+  interviewResult     InterviewResult?  // ✅ NEW: One-to-one relation with interview result
+
+  @@map("interviews")
+}
+
+// ✅ NEW: Separate Question model - only contains question data
+model Question {
+  id                   String    @id @default(cuid())
+  questionText         String
+  expectedAnswerFormat String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  // Relations
+  interviewId          String
+  interview            Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  answers              Answer[]
+
+  @@map("questions")
+}
+
+// ✅ NEW: Separate Answer model - contains answer data
+model Answer {
+  id          String    @id @default(cuid())
+  answerText  String
+  answeredAt  DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  questionId  String
+  question    Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  interviewId String
+  interview   Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  evaluation  Evaluation?
+
+  @@map("answers")
+}
+
+// ✅ UPDATED: Evaluation model with questionText and answerText fields
+model Evaluation {
+  id                           String    @id @default(cuid())
+  questionText                 String    // ✅ NEW: Store question text
+  answerText                   String    // ✅ NEW: Store answer text
+  interviewId                  String    // ✅ NEW: Store interview ID
+  factualAccuracy              String?
+  factualAccuracyExplanation   String?
+  completeness                 String?
+  completenessExplanation      String?
+  relevance                    String?
+  relevanceExplanation         String?
+  coherence                    String?
+  coherenceExplanation         String?
+  score                        Float?
+  inputTokens                  Int?
+  outputTokens                 Int?
+  finalEvaluation              String?
+  evaluatedAt                  DateTime  @default(now())
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
+
+  // Relations
+  answerId                     String    @unique
+  answer                       Answer    @relation(fields: [answerId], references: [id], onDelete: Cascade)
+
+  @@map("evaluations")
+}
+
+// ✅ NEW: Interview Result model to store overall evaluation results
+model InterviewResult {
+  id                      String    @id @default(cuid())
+  interviewId             String    @unique
+  candidateId             String
+  jobId                   String
+  evaluatedCount          Int       // Number of questions evaluated
+  totalQuestions          Int       // Total number of questions
+  averageFactualAccuracy  Float
+  averageCompleteness     Float
+  averageRelevance        Float
+  averageCoherence        Float
+  averageScore            Float
+  passStatus              String    // "pass", "fail", "borderline"
+  summaryResult           String    // Overall summary
+  knowledgeLevel          String    // Knowledge level used for evaluation
+  recommendations         String?   // AI recommendations for candidate
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  // Relations
+  interview               Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+
+  @@map("interview_results")
+}
+
+model InterviewTemplate {
+  id              String        @id @default(cuid())
+  name            String
+  type            InterviewType
+  duration        Int           @default(60)
+  questions       Json          // Array of question objects
+  evaluationCriteria Json       // Evaluation criteria
+  isDefault       Boolean       @default(false)
+  
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@map("interview_templates")
+}
+
+enum UserRole {
+  ADMIN
+  RECRUITER
+  HIRING_MANAGER
+  INDIVIDUAL
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  TEMPORARY
+  INTERNSHIP
+}
+
+enum JobStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  CLOSED
+}
+
+enum ApplicationStatus {
+  APPLIED
+  SCREENING
+  INTERVIEW
+  OFFER
+  HIRED
+  REJECTED
+}
+
+enum InterviewType {
+  PHONE
+  VIDEO
+  IN_PERSON
+  TECHNICAL
+  BEHAVIORAL
+  PANEL
+}
+
+enum InterviewStatus {
+  SCHEDULED
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+  RESCHEDULED
+  INVITED
+  JOINED
+}
