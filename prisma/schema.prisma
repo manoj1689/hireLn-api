@@ -389,7 +389,7 @@ model Application {
   status       ApplicationStatus @default(APPLIED)
   matchScore   Int?
   notes        String?
-  
+
   appliedAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
 
@@ -400,46 +400,51 @@ model Application {
   userId       String
   interviews   Interview[]
 
+  interviewResult InterviewResult? @relation("ApplicationToResult")
+
   @@unique([jobId, candidateId])
   @@map("applications")
 }
 
 model Interview {
-  id            String          @id @default(cuid())
-  scheduledById String
-  
-  // Interview Details
-  type          InterviewType
-  status        InterviewStatus @default(SCHEDULED)
-  scheduledAt   DateTime
-  duration      Int             @default(60) // minutes
-  timezone      String          @default("UTC")
-  
-  // Meeting Details
-  meetingLink   String?
-  location      String?
-  notes         String?
-  
-  // Interviewers (JSON array)
-  interviewers  Json?           // Array of interviewer objects
+  id              String          @id @default(cuid())
+  scheduledById   String
 
-  // Join token for secure access
-  joinToken     String?         // Token to join the interview
-  tokenExpiry   DateTime?       // Token expiration time
-  
-  // Email notification tracking
-  invitationSent Boolean        @default(false) // Track if invitation email was sent
-  
-  // Feedback
-  feedback      Json?           // Structured feedback object
-  rating        Int?            // Overall rating 1-5
-  recommendation String?        // HIRE, NO_HIRE, MAYBE
-  
+  // Interview Details
+  type            InterviewType
+  status          InterviewStatus @default(SCHEDULED)
+  scheduledAt     DateTime
+  duration        Int             @default(60)
+  timezone        String          @default("UTC")
+
+  // Meeting Details
+  meetingLink     String?
+  location        String?
+  notes           String?
+
+  // Interviewers (JSON array)
+  interviewers    Json?           // Array of InterviewerInfo
+
+  // Secure Access
+  joinToken       String?
+  tokenExpiry     DateTime?
+
+  // Email & Calendar
+  invitationSent  Boolean         @default(false)
+  calendarEventId String?         // ✅ NEW: Calendar integration
+
+  // Feedback & Evaluation
+  feedback        Json?
+  rating          Int?
+  recommendation  String?
+
+  // Interview Timing
+  startedAt       DateTime?
+  completedAt     DateTime?
+
   // Timestamps
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  startedAt         DateTime?       // When interview actually started
-  completedAt       DateTime?       // When interview was completed
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
 
   // Relations
   candidateId         String
@@ -452,10 +457,34 @@ model Interview {
   user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   questions           Question[]
   answers             Answer[]
-  interviewResult     InterviewResult?  // ✅ NEW: One-to-one relation with interview result
+  interviewResult     InterviewResult?  // One-to-one relation with result
+
+  // ✅ Candidate Additional Fields
+  candidateEducation   String?
+  candidateExperience  String?
+  candidateSkills      String[]       // Store as comma-separated or JSON string
+  candidateResume      String?
+  candidatePortfolio   String?
+  candidateLinkedIn    String?
+  candidateGitHub      String?
+  candidateLocation    String?
+
+  // ✅ Application
+  coverLetter          String?
+
+  // ✅ Job Additional Fields
+  jobDepartment        String?
+  jobDescription       String?
+  jobType              String?
+  jobResponsibility    String[]         // Store as comma-separated or JSON string
+  jobSkills            String[]         // Store as comma-separated or JSON string
+  jobEducation         String?
+  jobCertificates      String[]         // Store as comma-separated or JSON string
+  jobPublished         DateTime?
 
   @@map("interviews")
 }
+
 
 // ✅ NEW: Separate Question model - only contains question data
 model Question {
@@ -520,31 +549,32 @@ model Evaluation {
   @@map("evaluations")
 }
 
-// ✅ NEW: Interview Result model to store overall evaluation results
 model InterviewResult {
-  id                      String    @id @default(cuid())
-  interviewId             String    @unique
+  id                      String     @id @default(cuid())
+  interviewId             String     @unique
   candidateId             String
+  applicationId           String     @unique
   jobId                   String
-  evaluatedCount          Int       // Number of questions evaluated
-  totalQuestions          Int       // Total number of questions
+  evaluatedCount          Int
+  totalQuestions          Int
   averageFactualAccuracy  Float
   averageCompleteness     Float
   averageRelevance        Float
   averageCoherence        Float
   averageScore            Float
-  passStatus              String    // "pass", "fail", "borderline"
-  summaryResult           String    // Overall summary
-  knowledgeLevel          String    // Knowledge level used for evaluation
-  recommendations         String?   // AI recommendations for candidate
-  createdAt               DateTime  @default(now())
-  updatedAt               DateTime  @updatedAt
+  passStatus              String
+  summaryResult           String
+  knowledgeLevel          String
+  recommendations         String?
+  createdAt               DateTime   @default(now())
+  updatedAt               DateTime   @updatedAt
 
-  // Relations
-  interview               Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  interview               Interview   @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  application             Application @relation("ApplicationToResult", fields: [applicationId], references: [id], onDelete: Cascade)
 
   @@map("interview_results")
 }
+
 
 model InterviewTemplate {
   id              String        @id @default(cuid())

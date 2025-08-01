@@ -63,7 +63,7 @@ class EmailService:
         interviewers: Optional[List[str]] = None,
         interview_id: Optional[str] = None,
         join_token: Optional[str] = None,
-        frontend_url: str = "http://localhost:3000"
+        frontend_url: str = "https://hireln.com"
     ) -> bool:
         """Send interview invitation email with full interview metadata"""
 
@@ -205,77 +205,105 @@ class EmailService:
 
         return self.send_email(candidate_email, subject, body, html_body)
 
-    def send_individual_invitation(self,
+    def send_individual_result(
+        self,
         email: str,
-        first_name: str,
-        last_name: str,
+        name: str,
         organization_name: str,
-        invitation_token: str,
-        message: Optional[str] = None
+        invitation_token: Optional[str],
+        application_status: Optional[str],
+        score: Optional[float],
+        job_title: Optional[str],
+        department: Optional[str],
+        interview_date: Optional[str],
+        message: Optional[str] = None,
     ) -> bool:
-        """Send invitation email to individual user"""
+        """Send post-interview result email with optional invitation to selected candidate"""
 
-        subject = f"Invitation to join {organization_name} on HireIn"
-        registration_link = f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/register/individual?token={invitation_token}"
+        subject = f"Your Interview Result for {job_title or 'the position'} at {organization_name}"
+        registration_link = (
+            f"{os.getenv('FRONTEND_URL', 'https://hireln.com')}/register/individual?token={invitation_token}"
+            if invitation_token else None
+        )
 
+        plain_details = f"""
+    Interview Date: {interview_date or 'N/A'}
+    Application Status: {application_status or 'N/A'}
+    Score: {score if score is not None else 'N/A'}
+    Job Title: {job_title or 'N/A'}
+    Department: {department or 'N/A'}
+    """
+
+        # Plain text body
         body = f"""
-Dear {first_name} {last_name},
+    Dear {name},
 
-You have been invited to join {organization_name} on HireIn as a team member.
+    Thank you for interviewing for the position of {job_title or 'a role'} at {organization_name}.
 
-{message if message else ''}
+    Here is a summary of your application:
+    {plain_details}
 
-To complete your registration, please click the link below:
-{registration_link}
+    {f'Message from the team: {message}' if message else ''}
 
-This invitation will expire in 72 hours.
+    {f'To proceed and join our team, please complete your registration here: {registration_link}' if registration_link else ''}
 
-Best regards,
-{organization_name} Team
-"""
+    Best regards,  
+    {organization_name} Team
+    """
 
+        # HTML body
         html_body = f"""
-<!DOCTYPE html>
-<html>
-<head>
-  <style>
-    body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-    .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-    .header {{ background-color: #4f46e5; color: white; padding: 20px; text-align: center; }}
-    .content {{ padding: 20px; background-color: #f9fafb; }}
-    .invitation-box {{ background-color: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #4f46e5; }}
-    .button {{ display: inline-block; padding: 12px 24px; background-color: #4f46e5; color: white; text-decoration: none; border-radius: 5px; margin: 15px 0; }}
-    .footer {{ text-align: center; padding: 20px; color: #666; font-size: 14px; }}
-    .warning {{ background-color: #fef3c7; padding: 10px; border-radius: 5px; margin: 15px 0; }}
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>Team Invitation</h1>
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ background-color: #4f46e5; color: white; padding: 20px; text-align: center; }}
+        .content {{ padding: 20px; background-color: #f9fafb; }}
+        .result-box, .details-box {{
+        background-color: white; padding: 20px; border-radius: 8px; margin: 20px 0;
+        border-left: 4px solid #4f46e5;
+        }}
+        .button {{
+        display: inline-block; padding: 12px 24px; background-color: #4f46e5;
+        color: white; text-decoration: none; border-radius: 5px; margin: 15px 0;
+        }}
+        .footer {{ text-align: center; padding: 20px; color: #666; font-size: 14px; }}
+    </style>
+    </head>
+    <body>
+    <div class="container">
+        <div class="header">
+        <h1>Interview Result</h1>
+        </div>
+        <div class="content">
+        <p>Dear {name},</p>
+        <div class="result-box">
+            <h3>Thank you for interviewing for <strong>{job_title or 'the position'}</strong> at {organization_name}.</h3>
+            {f'<p><em>"{message}"</em></p>' if message else ''}
+        </div>
+        <div class="details-box">
+            <h4>📋 Your Interview Summary:</h4>
+            <ul>
+            <li><strong>Status:</strong> {application_status or 'N/A'}</li>
+            <li><strong>Score:</strong> {score if score is not None else 'N/A'}</li>
+            <li><strong>Interview Date:</strong> {interview_date or 'N/A'}</li>
+            <li><strong>Department:</strong> {department or 'N/A'}</li>
+            </ul>
+        </div>
+        {"<p>We're excited to move forward! Please click the button below to complete your registration and join the team:</p>" if registration_link else ""}
+        {f'<a href="{registration_link}" class="button">Complete Registration</a>' if registration_link else ""}
+        <p>If you have any questions, feel free to reach out to our team.</p>
+        </div>
+        <div class="footer">
+        <p>Best regards,<br>{organization_name} Team</p>
+        <p>Powered by HireIn</p>
+        </div>
     </div>
-    <div class="content">
-      <p>Dear {first_name} {last_name},</p>
-      <div class="invitation-box">
-        <h3>You're invited to join {organization_name}!</h3>
-        <p>You have been invited to join <strong>{organization_name}</strong> on HireIn as a team member.</p>
-        {f'<p><em>"{message}"</em></p>' if message else ''}
-      </div>
-      <p>To complete your registration and start collaborating with your team, click the button below:</p>
-      <a href="{registration_link}" class="button">Accept Invitation & Register</a>
-      <div class="warning">
-        <p><strong>⏰ Important:</strong> This invitation will expire in 72 hours.</p>
-      </div>
-      <p>If you have any questions, please contact your team administrator.</p>
-    </div>
-    <div class="footer">
-      <p>Best regards,<br>{organization_name} Team</p>
-      <p>Powered by HireIn</p>
-    </div>
-  </div>
-</body>
-</html>
-"""
+    </body>
+    </html>
+    """
         return self.send_email(email, subject, body, html_body)
 
     def send_calendar_invite(self,

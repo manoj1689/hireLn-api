@@ -133,8 +133,7 @@ class RegistrationStep2Response(BaseModel):
 
 class RegistrationCompleteResponse(BaseModel):
     message: str
-    user: UserResponse
-    token: Token
+    data: Token
     trialEndsAt: datetime
 
 # Core Job Schemas
@@ -304,12 +303,13 @@ class InterviewFeedbackRequest(BaseModel):
     nextSteps: Optional[str] = None
 
 class InterviewResponse(BaseModel):
+    # Core Interview Fields
     id: str
     candidateId: str
     candidateName: str
     candidateEmail: str
-    applicationId: str
-    jobId: str  #  Added jobId field
+    applicationId: Optional[str]
+    jobId: str
     jobTitle: str
     interviewType: InterviewType
     status: InterviewStatus
@@ -323,10 +323,33 @@ class InterviewResponse(BaseModel):
     feedback: Optional[dict] = None
     calendarEventId: Optional[str] = None
     invitationSent: bool = False
-    joinToken: Optional[str] = None  # One-time join token
-    tokenExpiry: Optional[datetime] = None  # Token expiration time
+    joinToken: Optional[str] = None
+    tokenExpiry: Optional[datetime] = None
     createdAt: datetime
     updatedAt: datetime
+
+    # Candidate Additional Fields
+    candidateEducation: Optional[str] = None
+    candidateExperience: Optional[str] = None
+    candidateSkills: List[str] = []
+    candidateResume: Optional[str] = None
+    candidatePortfolio: Optional[str] = None
+    candidateLinkedIn: Optional[str] = None
+    candidateGitHub: Optional[str] = None
+    candidateLocation: Optional[str] = None
+
+    # Application
+    coverLetter: Optional[str] = None
+
+    # Job Additional Fields
+    jobDepartment: Optional[str] = None
+    jobDescription: Optional[str] = None
+    jobType: Optional[str] = None
+    jobResponsibility: Optional[List[str]] = []
+    jobSkills: Optional[List[str]] = []
+    jobEducation: Optional[str] = None
+    jobCertificates: Optional[List[str]] = []
+    jobPublished: Optional[datetime] = None
 
 class InterviewCalendarEvent(BaseModel):
     title: str
@@ -938,6 +961,7 @@ class EvaluationWithDetailsResponse(BaseModel):
 # ✅ NEW: Interview Result Schemas
 class InterviewResultBase(BaseModel):
     candidateId: str
+    applicationId:str
     jobId: str
     evaluatedCount: int
     totalQuestions: int
@@ -961,7 +985,7 @@ class InterviewResultResponse(InterviewResultBase):
     updatedAt: datetime
 
 class InterviewResultWithDetailsResponse(InterviewResultResponse):
-    interview: Optional[InterviewResponse] = None
+    
     evaluations: List[EvaluationWithDetailsResponse] = []
 
 

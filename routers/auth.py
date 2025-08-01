@@ -219,10 +219,13 @@ async def register_step3(payment_info: PaymentInfo, session_id: str):
     await db.registrationsession.delete(where={"sessionId": session_id})
 
     # ✅ Step 6: Generate access token
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.id}, expires_delta=access_token_expires
-    )
+    # access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    # access_token = create_access_token(
+    #     data={"sub": user.id}, expires_delta=access_token_expires
+    # )
+
+    access_token = create_access_token(data={"sub": user.id})
+
 
     user_response = UserResponse(
         id=user.id,
@@ -241,7 +244,7 @@ async def register_step3(payment_info: PaymentInfo, session_id: str):
         updatedAt=user.updatedAt
     )
 
-    token = Token(
+    data = Token(
         access_token=access_token,
         token_type="bearer",
         user=user_response
@@ -249,8 +252,7 @@ async def register_step3(payment_info: PaymentInfo, session_id: str):
 
     return RegistrationCompleteResponse(
         message="Registration completed successfully! Welcome to your 14-day free trial.",
-        user=user_response,
-        token=token,
+        data=data,
         trialEndsAt=trial_ends_at
     )
 
@@ -269,11 +271,12 @@ async def login(user_credentials: UserLogin):
         )
     
     # Create access token
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.id}, expires_delta=access_token_expires
-    )
-    
+    # access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    # access_token = create_access_token(
+    #     data={"sub": user.id}, expires_delta=access_token_expires
+    # )
+    access_token = create_access_token(data={"sub": user.id})
+
     user_response = UserResponse(
         id=user.id,
         email=user.email,

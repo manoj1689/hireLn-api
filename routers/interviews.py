@@ -1,5 +1,7 @@
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import List, Optional, Union
+
+from fastapi.responses import JSONResponse
 from database import get_db
 from models.schemas import (
     InterviewResultWithDetailsResponse, InterviewScheduleRequest, InterviewResponse, InterviewRescheduleRequest,
@@ -9,7 +11,7 @@ from auth.dependencies import get_current_user, get_user_or_interview_auth
 from datetime import datetime, timedelta
 import pytz
 import json
-from service.email_service import email_service
+from service.email_service import EmailService, email_service
 from utils.openai_client import create_openai_chat
 from utils.token_utils import generate_interview_token, generate_token_expiry
 import logging
@@ -67,9 +69,9 @@ async def schedule_interview(
         "applicationId": interview_data.applicationId,
         "scheduledById": current_user.id,
         "userId": current_user.id,
-        "jobId": application.jobId,
+        "jobId": job.id,
         "type": interview_data.type,
-        "scheduledAt": scheduled_datetime,  # ✅ pass datetime object
+        "scheduledAt": scheduled_datetime,
         "duration": interview_data.duration,
         "timezone": interview_data.timezone,
         "meetingLink": interview_data.meetingLink,
@@ -78,7 +80,30 @@ async def schedule_interview(
         "joinToken": join_token,
         "tokenExpiry": token_expiry,
         "status": "SCHEDULED",
-        "interviewers": json.dumps([i.dict() for i in interview_data.interviewers]) if interview_data.interviewers else None
+        "interviewers": json.dumps([i.dict() for i in interview_data.interviewers]) if interview_data.interviewers else None,
+
+        # Candidate Additional Fields
+        "candidateEducation": candidate.education,
+        "candidateExperience": candidate.experience,
+        "candidateSkills": candidate.skills,
+        "candidateResume": candidate.resume,
+        "candidatePortfolio": candidate.portfolio,
+        "candidateLinkedIn": candidate.linkedin,
+        "candidateGitHub": candidate.github,
+        "candidateLocation": candidate.location,
+
+        # Application Field
+        "coverLetter": application.coverLetter,
+
+        # Job Additional Fields
+        "jobDepartment": job.department,
+        "jobDescription": job.description,
+        "jobType": job.employmentType,
+        "jobResponsibility": job.responsibilities,
+        "jobSkills": job.skills,
+        "jobEducation": job.education,
+        "jobCertificates": job.certifications,
+        "jobPublished": job.publishedAt,
     }
 
     interview = await db.interview.create(data=interview_data_dict)
@@ -239,28 +264,47 @@ async def get_interviews(
                 interviewers = []
         
         results.append({
-            "id": interview.id,
-            "candidateId": candidate.id,
-            "candidateName": candidate.name,
-            "candidateEmail": candidate.email,
-            "applicationId": application.id if application else None,
-            "jobId": interview.jobId,  # ✅ Added jobId to response
-            "jobTitle": job_title,
-            "interviewType": interview.type,
-            "status": interview.status,
-            "scheduledAt": interview.scheduledAt,
-            "duration": interview.duration,
-            "timezone": interview.timezone,
-            "interviewers": interviewers,
-            "meetingLink": interview.meetingLink,
-            "location": interview.location,
-            "notes": interview.notes,
-            "feedback": interview.feedback,
-            "invitationSent": interview.invitationSent,
-            "joinToken": interview.joinToken,
-            "tokenExpiry": interview.tokenExpiry,
-            "createdAt": interview.createdAt,
-            "updatedAt": interview.updatedAt
+             "id": interview.id,
+        "candidateId": candidate.id,
+        "candidateName": candidate.name,
+        "candidateEmail": candidate.email,
+        "candidateEducation":candidate.education, 
+        "candidateExperience":candidate.experience,
+        "candidateSkills":candidate.skills,
+        "candidateResume":candidate.resume,
+        "candidatePortfolio":candidate.portfolio,
+        "candidateLinkedIn":candidate.linkedin,
+        "candidateGitHub":candidate.github,
+        "candidateLocation":candidate.location,
+
+        "applicationId": application.id if application else None,
+        "coverLetter":application.coverLetter,
+
+        "jobId": interview.jobId,  # ✅ Added jobId to response
+        "jobTitle": job_title,
+        "jobDepartment":job.department,
+        "jobDescription":job.description,
+        "jobType":job.employmentType,
+        "jobResponsibility":job.responsibilities,
+        "jobSkills":job.skills,
+        "jobEducation":job.education,
+        "jobCertificates":job.certifications,
+        "jobPublished":job.publishedAt,
+        "interviewType": interview.type,
+        "status": interview.status,
+        "scheduledAt": interview.scheduledAt,
+        "duration": interview.duration,
+        "timezone": interview.timezone,
+        "interviewers": interviewers,
+        "meetingLink": interview.meetingLink,
+        "location": interview.location,
+        "notes": interview.notes,
+        "feedback": interview.feedback,
+        "invitationSent": interview.invitationSent,
+        "joinToken": interview.joinToken,
+        "tokenExpiry": interview.tokenExpiry,
+        "createdAt": interview.createdAt,
+        "updatedAt": interview.updatedAt
         })
     
     return [InterviewResponse(**result) for result in results]
@@ -313,9 +357,28 @@ async def get_interview(
         "candidateId": candidate.id,
         "candidateName": candidate.name,
         "candidateEmail": candidate.email,
+        "candidateEducation":candidate.education, 
+        "candidateExperience":candidate.experience,
+        "candidateSkills":candidate.skills,
+        "candidateResume":candidate.resume,
+        "candidatePortfolio":candidate.portfolio,
+        "candidateLinkedIn":candidate.linkedin,
+        "candidateGitHub":candidate.github,
+        "candidateLocation":candidate.location,
+
         "applicationId": application.id if application else None,
+        "coverLetter":application.coverLetter,
+
         "jobId": interview.jobId,  # ✅ Added jobId to response
         "jobTitle": job_title,
+        "jobDepartment":job.department,
+        "jobDescription":job.description,
+        "jobType":job.employmentType,
+        "jobResponsibility":job.responsibilities,
+        "jobSkills":job.skills,
+        "jobEducation":job.education,
+        "jobCertificates":job.certifications,
+        "jobPublished":job.publishedAt,
         "interviewType": interview.type,
         "status": interview.status,
         "scheduledAt": interview.scheduledAt,
@@ -770,6 +833,7 @@ async def auto_evaluate_interview(
                         **result_data,
                         "interviewId": interview_id,
                         "candidateId": interview.candidateId,
+                        "applicationId":interview.applicationId,
                         "jobId": interview.jobId or "Unknown",
                     }
                 )
@@ -865,57 +929,14 @@ async def get_interview_result(
                 "evaluatedAt": evaluation.evaluatedAt
             })
 
-        # Step 5: Build interview response for detailed result
-        interview_response = None
-        if interview:
-            candidate = await db.candidate.find_unique(where={"id": interview.candidateId})
-            application = await db.application.find_unique(
-                where={"id": interview.applicationId},
-                include={"job": True}
-            ) if interview.applicationId else None
-            job = interview.job if hasattr(interview, 'job') else (application.job if application else None)
-            
-            # Parse interviewers JSON if it exists
-            interviewers = []
-            if interview.interviewers:
-                try:
-                    if isinstance(interview.interviewers, str):
-                        interviewers = json.loads(interview.interviewers)
-                    elif isinstance(interview.interviewers, list):
-                        interviewers = interview.interviewers
-                except (json.JSONDecodeError, TypeError):
-                    interviewers = []
+        
 
-            interview_response = {
-                "id": interview.id,
-                "candidateId": candidate.id if candidate else interview.candidateId,
-                "candidateName": candidate.name if candidate else "Unknown",
-                "candidateEmail": candidate.email if candidate else "Unknown",
-                "applicationId": interview.applicationId,
-                "jobId": interview.jobId,
-                "jobTitle": job.title if job else "Unknown Position",
-                "interviewType": interview.type,
-                "status": interview.status,
-                "scheduledAt": interview.scheduledAt,
-                "duration": interview.duration,
-                "timezone": interview.timezone,
-                "interviewers": interviewers,
-                "meetingLink": interview.meetingLink,
-                "location": interview.location,
-                "notes": interview.notes,
-                "feedback": interview.feedback,
-                "invitationSent": interview.invitationSent,
-                "joinToken": interview.joinToken,
-                "tokenExpiry": interview.tokenExpiry,
-                "createdAt": interview.createdAt,
-                "updatedAt": interview.updatedAt
-            }
-
-        # Step 6: Build final response
+        # Step 5: Build final response
         response = {
             "id": interview_result.id,
             "interviewId": interview_result.interviewId,
             "candidateId": interview_result.candidateId,
+            "applicationId":interview_result.applicationId,
             "jobId": interview_result.jobId,
             "evaluatedCount": interview_result.evaluatedCount,
             "totalQuestions": interview_result.totalQuestions,
@@ -930,7 +951,6 @@ async def get_interview_result(
             "recommendations": interview_result.recommendations,
             "createdAt": interview_result.createdAt,
             "updatedAt": interview_result.updatedAt,
-            "interview": interview_response,
             "evaluations": detailed_evaluations
         }
 
@@ -941,3 +961,62 @@ async def get_interview_result(
     except Exception as e:
         logger.error(f"Error fetching interview result: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch interview result: {str(e)}")
+
+
+
+@router.post("/interview/{interview_id}/send-result")
+async def send_interview_result_email(
+    interview_id: str,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Send interview result to candidate by email using candidateId"""
+    db = get_db()
+
+    try:
+        # Step 1: Fetch interview
+        interview = await db.interview.find_unique(where={"id": interview_id})
+        if not interview:
+            raise HTTPException(status_code=404, detail="Interview not found")
+        if interview.userId != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+        # Step 2: Fetch interview result
+        result = await db.interviewresult.find_unique(
+            where={"interviewId": interview_id}
+        )
+        if not result:
+            raise HTTPException(status_code=404, detail="Interview result not found")
+
+        # Step 3: Fetch candidate info from candidate table
+        candidate = await db.candidate.find_unique(where={"id": result.candidateId})
+        if not candidate:
+            raise HTTPException(status_code=404, detail="Candidate not found")
+
+        # Step 4: Fetch job info
+        job = await db.job.find_unique(where={"id": result.jobId}) if result.jobId else None
+
+        # Step 5: Send email
+        email_service = EmailService()
+        success = email_service.send_individual_result(
+            email=candidate.email,
+            name=candidate.name,
+            organization_name="HireIn",  # or dynamically from user's org if applicable
+            invitation_token=None,
+            application_status=result.passStatus,
+            score=result.averageScore,
+            job_title=job.title if job else None,
+            department=job.department if job else None,
+            interview_date=str(interview.createdAt),
+            message=result.summaryResult
+        )
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to send email")
+
+        return JSONResponse(content={"message": "Interview result email sent successfully"}, status_code=200)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error sending interview result: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")

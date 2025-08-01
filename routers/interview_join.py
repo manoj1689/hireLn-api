@@ -87,6 +87,7 @@ async def join_interview(
             except:
                 interviewers = []
         
+        
         interview_response = InterviewResponse(
             id=interview.id,
             candidateId=candidate.id,
@@ -100,18 +101,43 @@ async def join_interview(
             scheduledAt=interview.scheduledAt,
             duration=interview.duration,
             timezone=interview.timezone,
-            interviewers=interviewers,
+            interviewers=interview.interviewers,
             meetingLink=interview.meetingLink,
             location=interview.location,
             notes=interview.notes,
             feedback=interview.feedback,
-            calendarEventId=getattr(interview, "calendarEventId", None),
+            calendarEventId=interview.calendarEventId,
             invitationSent=interview.invitationSent,
             joinToken=interview.joinToken,
             tokenExpiry=interview.tokenExpiry,
             createdAt=interview.createdAt,
-            updatedAt=interview.updatedAt
+            updatedAt=interview.updatedAt,
+
+            # Candidate Additional Fields
+            candidateEducation=interview.candidateEducation,
+            candidateExperience=interview.candidateExperience,
+            candidateSkills=interview.candidateSkills,
+            candidateResume=interview.candidateResume,
+            candidatePortfolio=interview.candidatePortfolio,
+            candidateLinkedIn=candidate.linkedin,
+            candidateGitHub=candidate.github,
+            candidateLocation=candidate.location,
+
+            # Application
+            coverLetter=application.coverLetter,
+
+            # Job Additional Fields
+            jobDepartment=interview.jobDepartment,
+            jobDescription=interview.jobDescription,
+            jobType=interview.jobType,
+            jobResponsibility=interview.jobResponsibility,
+            jobSkills=interview.jobSkills,
+            jobEducation=interview.jobEducation,
+            jobCertificates=interview.jobCertificates,
+            jobPublished=interview.jobPublished,
         )
+
+        
 
         
         # Generate redirect URL for the frontend
