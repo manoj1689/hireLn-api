@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import List, Optional, Union
 
 from fastapi.responses import JSONResponse
+from service.activity_service import ActivityHelpers
 from database import get_db
 from models.schemas import (
     InterviewResultWithDetailsResponse, InterviewScheduleRequest, InterviewResponse, InterviewRescheduleRequest,
@@ -63,6 +64,25 @@ async def schedule_interview(
     
     join_token = generate_interview_token()
     token_expiry = generate_token_expiry(hours=48)
+    
+    def safe_json(value, label=""):
+        if not value:
+            return None
+
+        if isinstance(value, (dict, list)):
+            return value
+
+        try:
+            parsed = json.loads(value)
+            return parsed
+        except json.JSONDecodeError as e:
+            return None
+
+
+    # Example usage:
+    candidate_education = safe_json(candidate.education, "candidate.education")
+    candidate_experience = safe_json(candidate.experience, "candidate.experience")
+
 
     interview_data_dict = {
         "candidateId": interview_data.candidateId,
@@ -81,11 +101,9 @@ async def schedule_interview(
         "tokenExpiry": token_expiry,
         "status": "SCHEDULED",
         "interviewers": json.dumps([i.dict() for i in interview_data.interviewers]) if interview_data.interviewers else None,
-
-        # Candidate Additional Fields
-        "candidateEducation": candidate.education,
-        "candidateExperience": candidate.experience,
-        "candidateSkills": candidate.skills,
+        "candidateEducation": json.dumps(candidate_education) if candidate_education else None,
+        "candidateExperience": json.dumps(candidate_experience) if candidate_experience else None,
+        "candidateSkills": candidate.technicalSkills,
         "candidateResume": candidate.resume,
         "candidatePortfolio": candidate.portfolio,
         "candidateLinkedIn": candidate.linkedin,
@@ -105,7 +123,7 @@ async def schedule_interview(
         "jobCertificates": job.certifications,
         "jobPublished": job.publishedAt,
     }
-
+    
     interview = await db.interview.create(data=interview_data_dict)
 
     interviewers_str_list = [f"{i.name} ({i.email})" for i in interview_data.interviewers] if interview_data.interviewers else []
@@ -140,7 +158,14 @@ async def schedule_interview(
             where={"id": application.id},
             data={"status": "INTERVIEW"}
         )
-
+    # Log activity
+    await ActivityHelpers.log_interview_scheduled(
+       user_id=current_user.id,
+       interview_id=interview.id,
+       candidate_name=candidate.name,
+       job_title=job.title,
+       scheduled_date=scheduled_datetime
+   )
     response = {
         "id": interview.id,
         "candidateId": candidate.id,
@@ -270,7 +295,7 @@ async def get_interviews(
         "candidateEmail": candidate.email,
         "candidateEducation":candidate.education, 
         "candidateExperience":candidate.experience,
-        "candidateSkills":candidate.skills,
+        "candidateSkills":candidate.technicalSkills,
         "candidateResume":candidate.resume,
         "candidatePortfolio":candidate.portfolio,
         "candidateLinkedIn":candidate.linkedin,
@@ -359,7 +384,7 @@ async def get_interview(
         "candidateEmail": candidate.email,
         "candidateEducation":candidate.education, 
         "candidateExperience":candidate.experience,
-        "candidateSkills":candidate.skills,
+        "candidateSkills":candidate.technicalSkills,
         "candidateResume":candidate.resume,
         "candidatePortfolio":candidate.portfolio,
         "candidateLinkedIn":candidate.linkedin,
@@ -463,6 +488,15 @@ async def reschedule_interview(
                 interviewers = updated_interview.interviewers
         except (json.JSONDecodeError, TypeError):
             interviewers = []
+    # Log activity
+    if candidate and job:
+       await ActivityHelpers.log_interview_rescheduled(
+           user_id=current_user.id,
+           interview_id=updated_interview.id,
+           candidate_name=candidate.name,
+           job_title=job.title,
+           new_date=new_scheduled_datetime
+       )
     
     response = {
         "id": updated_interview.id,
@@ -546,7 +580,31 @@ async def update_interview_status(
                 interviewers = updated_interview.interviewers
         except (json.JSONDecodeError, TypeError):
             interviewers = []
-    
+    # Log activity based on new status
+    if candidate and job:
+       if new_status == InterviewStatus.SCHEDULED:
+           await ActivityHelpers.log_interview_scheduled(
+               user_id=current_user.id,
+               interview_id=updated_interview.id,
+               candidate_name=candidate.name,
+               job_title=job.title
+           )
+       if new_status == InterviewStatus.COMPLETED:
+           await ActivityHelpers.log_interview_completed(
+               user_id=current_user.id,
+               interview_id=updated_interview.id,
+               candidate_name=candidate.name,
+               job_title=job.title
+           )
+       elif new_status == InterviewStatus.CANCELLED:
+           await ActivityHelpers.log_interview_cancelled(
+               user_id=current_user.id,
+               interview_id=updated_interview.id,
+               candidate_name=candidate.name,
+               job_title=job.title
+           )
+       
+
     response = {
         "id": updated_interview.id,
         "candidateId": candidate.id,
@@ -847,6 +905,15 @@ async def auto_evaluate_interview(
             else:
                 raise e
 
+        # Log activity
+        if interview.candidate and interview.job:
+           await ActivityHelpers.log_ai_evaluation_completed(
+               user_id= interview.userId,
+               interview_id=interview.id,
+               candidate_name=interview.candidate.name,
+               job_title=interview.job.title,
+               score=avg_score
+           )
         # Step 4: Return evaluation summary
         return {
             "success": True,
@@ -1012,6 +1079,14 @@ async def send_interview_result_email(
 
         if not success:
             raise HTTPException(status_code=500, detail="Failed to send email")
+        # Log activity
+        if job:
+           await ActivityHelpers.log_interview_result_sent(
+               user_id=current_user.id,
+               interview_id=interview.id,
+               candidate_name=candidate.name,
+               job_title=job.title
+           )
 
         return JSONResponse(content={"message": "Interview result email sent successfully"}, status_code=200)
 

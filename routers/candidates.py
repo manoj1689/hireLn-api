@@ -1,5 +1,7 @@
+import json
 from fastapi import APIRouter, HTTPException, status as http_status, Depends, Query
 from typing import List, Optional
+from service.activity_service import ActivityHelpers
 from database import get_db
 from models.schemas import (
     CandidateCreate, CandidateResponse, ApplicationCreate, 
@@ -7,6 +9,7 @@ from models.schemas import (
 )
 from auth.dependencies import get_current_user
 from models.schemas import InterviewStatus
+from fastapi.encoders import jsonable_encoder
 
 router = APIRouter()
 
@@ -17,7 +20,7 @@ async def create_candidate(
 ):
     """Create a new candidate"""
     db = get_db()
-    
+
     # Check if candidate already exists
     existing_candidate = await db.candidate.find_unique(where={"email": candidate_data.email})
     if existing_candidate:
@@ -25,56 +28,67 @@ async def create_candidate(
             status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Candidate with this email already exists"
         )
-    
-    candidate = await db.candidate.create(data=candidate_data.dict())
-    
-    # Build response with null status fields for new candidate
-    candidate_data = candidate.dict()
-    candidate_data["applicationStatus"] = None
-    candidate_data["interviewStatus"] = None
-    
-    return CandidateResponse(**candidate_data)
 
-from typing import Optional, List
-from fastapi import Query
+    # Convert Pydantic model to dict
+    candidate_dict = candidate_data.dict()
+
+    # Fields to be serialized as JSON strings before storing
+    json_fields = [
+        "education", 
+        "experience", 
+        "certifications", 
+        "projects", 
+        "previousJobs", 
+        "personalInfo"
+    ]
+
+    for field in json_fields:
+        if candidate_dict.get(field) is not None:
+            candidate_dict[field] = json.dumps(candidate_dict[field])
+
+    # Create candidate in DB
+    candidate = await db.candidate.create(data=candidate_dict)
+    print("Candidate JSON (after serialization):", json.dumps(candidate_dict, indent=2))
+
+    # Prepare response with default fields
+    response_data = candidate.dict()
+    response_data["applicationStatus"] = None
+    response_data["interviewStatus"] = None
+
+    # Log activity
+    await ActivityHelpers.log_candidate_added(
+        user_id=current_user.id,
+        candidate_id=candidate.id,
+        candidate_name=candidate.name
+    )
+
+    return CandidateResponse(**response_data)
 
 @router.get("/", response_model=List[CandidateResponse])
 async def get_candidates(
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
     search: Optional[str] = None,
-    location: Optional[str] = None,
-    skills: Optional[List[str]] = Query(None),
-    experience: Optional[int] = None,
+    technicalSkills: Optional[List[str]] = Query(None),
     current_user: UserResponse = Depends(get_current_user)
 ):
-    """Get all candidates with optional filtering, including application and interview status"""
+    """Get all candidates with optional filtering by search and technical skills only"""
     db = get_db()
     
     where_clause = {}
 
-    # Search by name/email/skills (single keyword search)
+    # Search by name/email/skills
     if search:
         where_clause["OR"] = [
             {"name": {"contains": search, "mode": "insensitive"}},
             {"email": {"contains": search, "mode": "insensitive"}},
-            {"skills": {"has": search}}  # for single skill in search
+            {"technicalSkills": {"has": search}}
         ]
 
-    # Filter by location
-    if location:
-        where_clause["location"] = {"contains": location, "mode": "insensitive"}
-    
-    # Filter by multiple skills (check if candidate has *any* of the given skills)
-    if skills:
+    # Filter by technicalSkills
+    if technicalSkills:
         where_clause["AND"] = where_clause.get("AND", []) + [
-            {"skills": {"hasSome": skills}}  # hasSome means overlap with list
-        ]
-    
-    # Filter by experience
-    if experience is not None:
-        where_clause["AND"] = where_clause.get("AND", []) + [
-            {"yearsOfExperience": {"gte": experience}}
+            {"technicalSkills": {"hasSome": technicalSkills}}
         ]
 
     candidates = await db.candidate.find_many(
@@ -119,7 +133,6 @@ async def get_candidates(
         result.append(CandidateResponse(**candidate_data))
     
     return result
-
 
 @router.get("/{candidate_id}", response_model=CandidateResponse)
 async def get_candidate(
@@ -202,6 +215,13 @@ async def update_candidate(
     candidate_data["applicationStatus"] = None
     candidate_data["interviewStatus"] = None
 
+    # Log activity
+    await ActivityHelpers.log_candidate_updated(
+       user_id=current_user.id,
+       candidate_id=candidate.id,
+       candidate_name=candidate.name
+   )
+
     return CandidateResponse(**candidate_data)
 
 
@@ -222,6 +242,11 @@ async def delete_candidate(
 
     await db.candidate.delete(where={"id": candidate_id})
     
+    await ActivityHelpers.log_candidate_deleted(
+       user_id=current_user.id,
+       candidate_id=candidate_id,
+       candidate_name=existing_candidate.name
+   )
 
 
 @router.post("/applications", response_model=ApplicationResponse)
@@ -252,6 +277,18 @@ async def create_application(
     app_data["userId"] = current_user.id  # Use the current authenticated user's ID
     
     application = await db.application.create(data=app_data)
+    
+     # Fetch job and candidate details for logging
+    job = await db.job.find_unique(where={"id": application.jobId})
+    candidate = await db.candidate.find_unique(where={"id": application.candidateId})
+
+    if job and candidate:
+       await ActivityHelpers.log_application_received(
+           user_id=current_user.id,
+           application_id=application.id,
+           candidate_name=candidate.name,
+           job_title=job.title
+       )
     return ApplicationResponse(**application.dict())
 
 @router.get("/applications/list", response_model=List[ApplicationResponse])
@@ -370,7 +407,19 @@ async def update_application(
         where={"id": application_id},
         data=update_data
     )
-    
+   
+
+    # Log activity if status changed
+    if application_data.status and application_data.status != existing_application.status:
+        if existing_application.job and existing_application.candidate:
+            await ActivityHelpers.log_application_status_changed(
+                user_id=current_user.id,
+                application_id=application.id,
+                candidate_name=existing_application.candidate.name,
+                job_title=existing_application.job.title,
+                new_status=application_data.status.value
+            )
+   
     return ApplicationResponse(**application.dict())
 
 # Add a debug endpoint to check what data exists

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, status, Depends
 from prisma import Json
+from service.activity_service import ActivityHelpers
 from database import get_db
 from models.schemas import (
     CompanyResponse, CompanyCreate, CompanyUpdate,
@@ -39,6 +40,12 @@ async def get_company_profile(current_user: UserResponse = Depends(get_current_u
                 "remoteHiringRegions": []
             }
         )
+    # Log activity for company creation if it was just created
+    await ActivityHelpers.log_company_created(
+           user_id=current_user.id,
+           company_id=company.id,
+           company_name=company.name
+       )
     
     return CompanyResponse(
         id=company.id,
@@ -137,6 +144,13 @@ async def update_company_profile(
         where={"userId": current_user.id},
         data=update_data
     )
+
+    # Log activity
+    await ActivityHelpers.log_company_updated(
+        user_id=current_user.id,
+        company_id=updated_company.id,
+        company_name=updated_company.name
+    )
     
     return CompanyResponse(
         id=updated_company.id,
@@ -186,6 +200,7 @@ async def get_company_locations(current_user: UserResponse = Depends(get_current
         # order_by={"isHeadquarters": "desc"}
     )
     
+    
     return [
         CompanyLocationResponse(
             id=location.id,
@@ -205,7 +220,7 @@ async def get_company_locations(current_user: UserResponse = Depends(get_current
         )
         for location in locations
     ]
-
+    
 @router.post("/locations", response_model=CompanyLocationResponse)
 async def create_company_location(
     location_data: CompanyLocationCreate,
@@ -476,7 +491,12 @@ async def invite_team_member(
     )
     
     # TODO: Send invitation email here
-    
+    # Log activity
+    await ActivityHelpers.log_team_member_invited(
+       user_id=current_user.id,
+       invited_member_email=invite_data.email,
+       invited_by_name=f"{current_user.firstName} {current_user.lastName}"
+   )
     return TeamMemberResponse(
         id=team_member.id,
         companyId=team_member.companyId,
@@ -546,7 +566,12 @@ async def update_team_member(
         where={"id": member_id},
         data=update_data
     )
-    
+    # Log activity
+    await ActivityHelpers.log_team_member_updated(
+        user_id=current_user.id,
+        member_id=updated_member.id,
+        member_name=updated_member.name
+    )
     return TeamMemberResponse(
         id=updated_member.id,
         companyId=updated_member.companyId,
@@ -596,7 +621,12 @@ async def delete_team_member(
         )
     
     await db.teammember.delete(where={"id": member_id})
-    
+    # Log activity
+    await ActivityHelpers.log_team_member_deleted(
+       user_id=current_user.id,
+       member_id=member_id,
+       member_name=member
+   )
     return {"message": "Team member removed successfully"}
 
 # Subscription & Billing Endpoints

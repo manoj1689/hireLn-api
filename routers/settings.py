@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, status, Depends
+from service.activity_service import ActivityHelpers
 from database import get_db
 from models.schemas import (
     UserSettingsResponse, UserSettingsUpdate, UserSettingsCreate,
@@ -148,7 +149,11 @@ async def update_user_settings(
             where={"userId": current_user.id},
             data=update_data
         )
-    
+    # Log activity
+    await ActivityHelpers.log_settings_updated(
+       user_id=current_user.id,
+       setting_type="general" # Can be more specific if needed
+   )
     return UserSettingsResponse(
         id=settings.id,
         userId=settings.userId,
@@ -198,6 +203,11 @@ async def update_general_settings(
         where={"userId": current_user.id},
         data=update_data
     )
+    # Log activity
+    await ActivityHelpers.log_settings_updated(
+       user_id=current_user.id,
+       setting_type="general"
+   )
     
     return UserSettingsResponse(
         id=settings.id,
@@ -246,7 +256,11 @@ async def update_email_settings(
         where={"userId": current_user.id},
         data=update_data
     )
-    
+    # Log activity
+    await ActivityHelpers.log_settings_updated(
+       user_id=current_user.id,
+       setting_type="email"
+   )
     return UserSettingsResponse(
         id=settings.id,
         userId=settings.userId,
@@ -308,7 +322,11 @@ async def update_notification_settings(
         where={"userId": current_user.id},
         data=update_data
     )
-    
+    # Log activity
+    await ActivityHelpers.log_settings_updated(
+       user_id=current_user.id,
+       setting_type="notifications"
+   )
     return UserSettingsResponse(
         id=settings.id,
         userId=settings.userId,

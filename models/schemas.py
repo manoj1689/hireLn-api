@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, Field
-from typing import Dict, Optional, List, Union
+from typing import Any, Dict, Optional, List, Union
 from datetime import datetime
 from enum import Enum
 from decimal import Decimal
@@ -218,6 +218,7 @@ class JobRequirements(BaseModel):
     requiredSkills: List[str] = []
     educationLevel: Optional[str] = None
     certifications: List[str] = []
+    requirements: List[str] = []
     languages: List[Dict[str, str]] = []  # e.g. [{"language": "English", "level": "fluent"}]
     softSkills: List[str] = []
 
@@ -263,6 +264,21 @@ class JobCreationCompleteResponse(BaseModel):
     publishedTo: List[str] = []
 
 # Interview Scheduling Schemas
+class CandidateEducation(BaseModel):
+    degree: Optional[str]
+    institution: Optional[str]
+    location: Optional[str]
+    start_date: Optional[str]
+    end_date: Optional[str]
+    grade: Optional[str]
+
+class CandidateExperience(BaseModel):
+    title: Optional[str]
+    company: Optional[str]
+    location: Optional[str]
+    start_date: Optional[str]
+    end_date: Optional[str]
+
 class InterviewerInfo(BaseModel):
     name: str
     email: EmailStr
@@ -329,8 +345,8 @@ class InterviewResponse(BaseModel):
     updatedAt: datetime
 
     # Candidate Additional Fields
-    candidateEducation: Optional[str] = None
-    candidateExperience: Optional[str] = None
+    candidateEducation: Optional[List[CandidateEducation]] = None
+    candidateExperience:Optional[List[CandidateExperience]] = None
     candidateSkills: List[str] = []
     candidateResume: Optional[str] = None
     candidatePortfolio: Optional[str] = None
@@ -378,20 +394,79 @@ class InterviewJoinResponse(BaseModel):
     redirectUrl: Optional[str] = None
 
 # Candidate schemas
+class PersonalInfo(BaseModel):
+    dob: Optional[str] = None
+    gender: Optional[str] = None
+    maritalStatus: Optional[str] = None
+    nationality: Optional[str] = None
+
+
+class Certification(BaseModel):
+    title: str
+    issuer: Optional[str] = None
+    date: Optional[str] = None
+
+
+class Project(BaseModel):
+    title: str
+    description: Optional[str] = None
+    url: Optional[str] = None
+
+
+class Education(BaseModel):
+    degree: Optional[str]
+    institution: Optional[str]
+    location: Optional[str]
+    start_date: Optional[str]
+    end_date: Optional[str]
+    grade: Optional[str]
+
+class Experience(BaseModel):
+    title: Optional[str]
+    company: Optional[str]
+    location: Optional[str]
+    start_date: Optional[str]
+    end_date: Optional[str]
+    
+class PreviousJob(BaseModel):
+    title: str
+    company: str
+    location: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    description: List[str] = []
+
+
 class CandidateBase(BaseModel):
-    email: EmailStr
     name: str
+    email: EmailStr
     phone: Optional[str] = None
+    address: List[str] = []
+    location: Optional[str] = None
+
+    personalInfo: Optional[PersonalInfo] = None
+    summary: Optional[str] = None
+
+    education: Optional[List[Education]] = None
+    experience: Optional[List[Experience]] = None
+    previousJobs: List[PreviousJob] = []
+
+    internships: List[str] = []
+    technicalSkills: List[str] = []
+    softSkills: List[str] = []
+    languages: List[str] = []
+    certifications: Optional[List[Certification]] = None
+    projects: Optional[List[Project]] = None
+    hobbies: List[str] = []
+    
+    salaryExpectation: Optional[int] = None
+    department: Optional[str] = None
+
     resume: Optional[str] = None
     portfolio: Optional[str] = None
     linkedin: Optional[str] = None
     github: Optional[str] = None
-    skills: List[str] = []
-    experience: Optional[str] = None
-    education: Optional[str] = None
-    location: Optional[str] = None
-    salaryExpectation: Optional[int] = None
-    
+
 class CandidateCreate(CandidateBase):
     pass
 
@@ -431,12 +506,17 @@ class ApplicationResponse(ApplicationBase):
     updatedAt: datetime
 
 # Dashboard schemas
+
+class MetricWithChange(BaseModel):
+    value: int | float
+    change: float  # percentage change
+
 class DashboardMetrics(BaseModel):
-    totalJobs: int
-    activeCandidates: int
-    hiringSuccessRate: float
-    avgTimeToHire: int
-    aiInterviewsCompleted: int
+    totalJobs: MetricWithChange
+    activeCandidates: MetricWithChange
+    hiringSuccessRate: MetricWithChange
+    avgTimeToHire: MetricWithChange
+    aiInterviewsCompleted: MetricWithChange
 
 class RecruitmentTrend(BaseModel):
     month: str
@@ -1041,3 +1121,16 @@ class CreateJobDescriptionResponse(BaseModel):
     generated_content: str
     input_tokens: int
     output_tokens: int
+
+# New schemas for resume parsing
+
+    
+class ResumeParseResult(BaseModel):
+    file_name: str
+    data: Optional[CandidateCreate] = None
+    error: Optional[str] = None
+
+class ParseResumesFromDriveResponse(BaseModel):
+    folder_id: str
+    resumes: List[CandidateCreate]
+    message: str = "Resume parsing initiated."

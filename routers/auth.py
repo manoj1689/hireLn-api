@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from datetime import timedelta, datetime, timezone
 import uuid
 import json
+from service.activity_service import ActivityHelpers
 from database import get_db
 from models.schemas import (
     UserBasicInfo, CompanyDetails, PaymentInfo, UserRegistration,
@@ -250,6 +251,12 @@ async def register_step3(payment_info: PaymentInfo, session_id: str):
         user=user_response
     )
 
+    # Log activity
+    await ActivityHelpers.log_user_registered(
+        user_id=user.id,
+        user_email=user.email
+    )
+
     return RegistrationCompleteResponse(
         message="Registration completed successfully! Welcome to your 14-day free trial.",
         data=data,
@@ -294,6 +301,11 @@ async def login(user_credentials: UserLogin):
         updatedAt=user.updatedAt
     )
     
+      # Log activity
+    await ActivityHelpers.log_user_login(
+        user_id=user.id,
+        user_email=user.email
+    )
     return Token(
         access_token=access_token,
         token_type="bearer",

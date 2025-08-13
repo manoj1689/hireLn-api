@@ -1,9 +1,10 @@
 import uuid
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, UploadFile, File, Header, logger
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, UploadFile, File, Header
 from fastapi.middleware.cors import CORSMiddleware
 import openai
 from pydantic import BaseModel, Field, ValidationError
 from typing import List, Dict, Any, Optional, Union
+from service.candidate_service import create_candidate_from_parsed_data
 from utils.openai_client import create_openai_chat
 from dotenv import load_dotenv
 import json
@@ -12,11 +13,24 @@ import re
 import html
 from requests import Session
 
-from database import get_db
+# New imports for resume parsing
+from ollama import Client
+import base64
+import fitz # PyMuPDF
+import os
+import tempfile
+import requests
+from pathlib import Path
+from googleapiclient.discovery import build
+from google.oauth2 import service_account
+from fastapi import Depends
+from database import get_db  # async session getter (assumed)
+from prisma import Prisma 
 import pdfplumber
-from io import BytesIO  # Importing BytesIO for handling file content
+from io import BytesIO
 from models.schemas import (
     CandidateResponse,
+    CandidateCreate,
     CreateJobDescriptionRequest,
     CreateJobDescriptionResponse,
     ErrorResponse,
@@ -32,7 +46,10 @@ from models.schemas import (
     InterviewQuestionsFromJobCandidateResponse,
     CandidateEvaluationRequest,
     CandidateEvaluationResponse,
-    UserResponse
+    UserResponse,
+    # New imports for resume parsing
+    ParseResumesFromDriveResponse,
+    ResumeParseResult
 )
 from auth.dependencies import get_current_user, get_user_or_interview_auth
 
@@ -45,6 +62,163 @@ logger = logging.getLogger(__name__)
 # Load environment variables from a .env file
 load_dotenv()
 
+# Constants for resume parsing
+# SERVER = "http://103.99.186.164:11434"
+# MODEL = "qwen2.5vl:7b"
+SERVICE_ACCOUNT_FILE = "hirelnresumes-185cd081b37f.json"
+SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+
+openai_model = os.getenv("OPENAI_MODEL", "gpt-4")
+openai_api_key = os.getenv("OPENAI_API_KEY")
+client = openai.OpenAI(api_key=openai_api_key)
+
+# Initialize Google Drive service (global for efficiency)
+try:
+    credentials = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+    drive_service = build("drive", "v3", credentials=credentials)
+except Exception as e:
+    logger.error(f"Failed to initialize Google Drive service: {e}")
+    drive_service = None # Set to None if initialization fails, so endpoints can check
+
+def clean_extracted_text(text: str) -> str:
+    text = re.sub(r'\n{2,}', '\n\n', text).strip()
+    return text
+
+def extract_text_with_pymupdf(pdf_bytes: bytes) -> str:
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    return "\n".join(page.get_text() for page in doc)
+
+
+# Utility: extract structured data from a PDF using Open AI
+def extract_resume_data(text: str) -> CandidateCreate:
+    prompt = (
+        "You are a strict JSON generator for extracting structured candidate data from resumes.\n"
+        "Extract ONLY the following fields from the given resume text.\n"
+        "Your output MUST be a valid, strictly formatted JSON object with ALL specified fields.\n\n"
+        "⚠️ RULES:\n"
+        "- Always include **ALL** fields listed below.\n"
+        "- If data is missing:\n"
+        "  - Use an empty string (`\"\"`) for string fields\n"
+        "  - Use an empty array (`[]`) for list fields\n"
+        "  - Use an empty object (`{}`) for object fields\n"
+        "- Do NOT include extra fields or explanations.\n"
+        "- Ensure all nested structures follow the expected format strictly.\n\n"
+        "### Required JSON Fields:\n"
+        "{\n"
+        '  "name": string,\n'
+        '  "email": string,\n'
+        '  "phone": string,\n'
+        '  "address": array of strings,\n'
+        '  "location": string,\n'
+        '  "personalInfo": {\n'
+        '    "dob": string,\n'
+        '    "gender": string,\n'
+        '    "maritalStatus": string,\n'
+        '    "nationality": string\n'
+        '  },\n'
+        '  "summary": string,\n'
+        '  "education": [\n'
+        '    {\n'
+        '      "degree": string,\n'
+        '      "institution": string,\n'
+        '      "location": string,\n'
+        '      "start_date": string,\n'
+        '      "end_date": string,\n'
+        '      "grade": string\n'
+        '    }\n'
+        '  ],\n'
+        '  "experience": [\n'
+        '    {\n'
+        '      "title": string,\n'
+        '      "company": string,\n'
+        '      "location": string,\n'
+        '      "start_date": string,\n'
+        '      "end_date": string,\n'
+        '      "description": string\n'
+        '    }\n'
+        '  ],\n'
+        '  "previousJobs": [\n'
+        '    {\n'
+        '      "title": string,\n'
+        '      "company": string,\n'
+        '      "location": string,\n'
+        '      "start_date": string,\n'
+        '      "end_date": string,\n'
+        '      "description": array of strings\n'
+        '    }\n'
+        '  ],\n'
+        '  "internships": array of strings,\n'
+        '  "technicalSkills": array of strings,\n'
+        '  "softSkills": array of strings,\n'
+        '  "languages": array of strings,\n'
+        '  "certifications": [\n'
+        '    {\n'
+        '      "title": string,\n'
+        '      "issuer": string,\n'
+        '      "date": string\n'
+        '    }\n'
+        '  ],\n'
+        '  "projects": [\n'
+        '    {\n'
+        '      "title": string,\n'
+        '      "description": string,\n'
+        '      "url": string\n'
+        '    }\n'
+        '  ],\n'
+        '  "hobbies": array of strings,\n'
+        '  "salaryExpectation": integer,\n'
+        '  "department": string\n'
+        '  "resume": string (optional)\n'
+        '  "portfolio": string (optional)\n'
+        '  "linkedin": string (optional)\n'
+        '  "github": string (optional)\n'
+        '}\n\n'
+        "### Resume text:\n"
+        f"{text}\n\n"
+        "### Response:\n"
+        "Return a valid JSON object only. No markdown. No explanations. No extra keys."
+    )
+    messages = [
+        {"role": "user", "content": prompt}
+    ]
+
+    try:
+        response = client.chat.completions.create(
+            model=openai_model,
+            messages=messages,
+            temperature=0.2,
+            max_tokens=2000
+        )
+        content = response.choices[0].message.content.strip()
+
+        # Strip ```json ... ``` wrappers if present
+        content = re.sub(r"^```(json)?|```$", "", content.strip(), flags=re.MULTILINE).strip()
+
+        parsed_data = json.loads(content)
+        return CandidateCreate(**parsed_data)  # Validate via Pydantic
+    except Exception as e:
+        logger.error("OpenAI API call failed", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"OpenAI API failed: {str(e)}")
+    
+
+async def process_resume_file(temp_path: Path, file_name: str, current_user: UserResponse, db: Prisma):
+    try:
+        with open(temp_path, "rb") as f:
+            pdf_bytes = f.read()
+
+        raw_text = extract_text_with_pymupdf(pdf_bytes)
+        cleaned_text = clean_extracted_text(raw_text)
+
+        parsed_data = extract_resume_data(cleaned_text)  # not str(temp_path)
+        
+        
+        success, message = await create_candidate_from_parsed_data(parsed_data, current_user, db)
+        print("file",file_name, "success", success, "message", message)
+        return {"file": file_name, "success": success, "message": message}
+
+    except Exception as e:
+        logger.warning(f"Failed to process {file_name}: {e}")
+        return {"file": file_name, "success": False, "message": str(e)}
 
 
 @router.post("/generate_interview_questions", response_model=InterviewQuestionsResponse)
@@ -255,6 +429,25 @@ async def generate_interview_questions_from_job_candidate(
                 interview_data["candidate"].id != request.candidate_id):
                 raise HTTPException(status_code=403, detail="Interview token doesn't match job/candidate")
 
+        def safe_json(value, label=""):
+            if not value:
+                return None
+
+            if isinstance(value, (dict, list)):
+                return value
+
+            try:
+                parsed = json.loads(value)
+                return parsed
+            except json.JSONDecodeError as e:
+                return None
+
+
+        # Example usage:
+        candidate_education = safe_json(candidate.education, "candidate.education")
+        candidate_experience = safe_json(candidate.experience, "candidate.experience")
+
+
         # Prepare job information
         job_info = {
             "title": job.title,
@@ -269,11 +462,11 @@ async def generate_interview_questions_from_job_candidate(
         # Prepare candidate information
         candidate_info = {
             "name": candidate.name,
-            "skills": candidate.skills or [],
-            "experience": candidate.experience or "Not specified",
-            "education": candidate.education or "Not specified",
+            "skills": candidate.technicalSkills or [],
+            "experience": json.dumps(candidate_experience) if candidate_experience else "Not specified",
+            "education": json.dumps(candidate_education) if candidate_education else "Not specified",
             "resume": candidate.resume or "No resume provided"
-        }
+                }
 
         # Create a comprehensive prompt
         prompt = (
@@ -581,7 +774,7 @@ async def get_matched_candidates(
     # Prepare filters with partial matching and fallbacks
     filters = [
         {
-            "skills": {
+            "technicalSkills": {
                 "hasSome": job_skills  # candidate must have at least one skill in job_skills
             }
         }
@@ -595,40 +788,58 @@ async def get_matched_candidates(
     #         }
     #     })
     # print("job exp",job_experience)
+   # Match candidate experience based on range
     # if job_experience:
-    #     # you can customize this keyword extraction based on your data
-    #     experience_keyword = "experience" if "experience" in job_experience.lower() else job_experience
+    #     job_exp_min, job_exp_max = parse_experience_range(job_experience)
+
     #     filters.append({
-    #         "experience": {
-    #             "contains": experience_keyword,
+    #         "OR": [
+    #             {"experience": None},  
+    #             {
+    #                 "AND": [
+    #                     {
+    #                         "experience": {
+    #                             "in": [
+    #                                 exp_range
+    #                                 for exp_range in [
+    #                                     "0-1", "1-3", "3-5", "5-10", "10+"
+    #                                 ]
+    #                                 if ranges_overlap(
+    #                                     job_exp_min, job_exp_max,
+    #                                     *parse_experience_range(exp_range)
+    #                                 )
+    #                             ]
+    #                         }
+    #                     }
+    #                 ]
+    #             }
+    #         ]
+    #     })
+
+    # if job_education:
+    #     # partial match on "Bachelor", "Master", etc.
+    #     edu_keyword = "Bachelor" if "bachelor" in job_education.lower() else job_education
+    #     filters.append({
+    #         "education": {
+    #             "contains": edu_keyword,
     #             "mode": "insensitive"
     #         }
     #     })
 
-    if job_education:
-        # partial match on "Bachelor", "Master", etc.
-        edu_keyword = "Bachelor" if "bachelor" in job_education.lower() else job_education
-        filters.append({
-            "education": {
-                "contains": edu_keyword,
-                "mode": "insensitive"
-            }
-        })
-
     # Salary expectation filter with fallback to None
-    salary_filter = {
-        "OR": [
-            {"salaryExpectation": None},
-            {
-                "AND": [
-                    {"salaryExpectation": {"gte": job_salary_min}},
-                    {"salaryExpectation": {"lte": job_salary_max}},
-                ]
-            }
-        ]
-    }
+    # salary_filter = {
+    #     "OR": [
+    #         {"salaryExpectation": None},
+    #         {
+    #             "AND": [
+    #                 {"salaryExpectation": {"gte": job_salary_min}},
+    #                 {"salaryExpectation": {"lte": job_salary_max}},
+    #             ]
+    #         }
+    #     ]
+    # }
 
-    filters.append(salary_filter)
+    # filters.append(salary_filter)
 
     candidates = await db.candidate.find_many(
         where={"AND": filters},
@@ -654,3 +865,99 @@ def clean_extracted_text(text: str) -> str:
     
     return clean_text
 
+def parse_experience_range(exp: str):
+    if exp == "10+":
+        return 10, float("inf")
+    if "-" in exp:
+        parts = exp.split("-")
+        return int(parts[0]), int(parts[1])
+    return 0, 0
+
+def ranges_overlap(min1, max1, min2, max2):
+    return max(min1, min2) <= min(max1, max2)
+
+
+@router.post("/parse_resumes_from_drive")
+async def parse_resumes_from_drive(
+    folder_id: str = Query(..., description="Google Drive folder ID containing the resumes."),
+    limit: int = Query(4, gt=0, le=100),
+    current_user: UserResponse = Depends(get_current_user),
+    db: Prisma = Depends(get_db)
+):
+    if not drive_service:
+        raise HTTPException(status_code=500, detail="Google Drive service not initialized.")
+
+    results = []
+
+    try:
+        query = f"'{folder_id}' in parents and trashed = false and mimeType='application/pdf'"
+        response = drive_service.files().list(q=query, fields="files(id, name)").execute()
+        files = response.get("files", [])[:limit]
+
+        for file in files:
+            file_id = file["id"]
+            file_name = file["name"]
+            temp_path = Path(tempfile.gettempdir()) / file_name
+
+            try:
+                # Download file
+                download_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+                headers = {"Authorization": f"Bearer {credentials.token}"}
+                res = requests.get(download_url, headers=headers)
+
+                if res.status_code != 200:
+                    raise Exception(f"Failed to download {file_name} from Google Drive.")
+
+                with open(temp_path, "wb") as f:
+                    f.write(res.content)
+
+                result = await process_resume_file(temp_path, file_name, current_user, db)
+                results.append(result)
+
+            except Exception as e:
+                results.append({
+                    "file": file_name,
+                    "success": False,
+                    "message": str(e)
+                })
+            finally:
+                if temp_path.exists():
+                    temp_path.unlink(missing_ok=True)
+
+        return {"summary": results}
+
+    except Exception as e:
+        logger.exception("Error in parse_resumes_from_drive")
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+   
+
+@router.post("/parse-resumes-upload")
+async def parse_resumes_upload(
+    files: List[UploadFile] = File(..., description="List of PDF resume files to upload and parse."),
+    current_user: UserResponse = Depends(get_current_user),
+    db: Prisma = Depends(get_db)
+):
+    creation_summary = []
+
+    for file in files:
+        file_name = file.filename
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+                temp_file.write(await file.read())
+                temp_path = Path(temp_file.name)
+
+            result = await process_resume_file(temp_path, file_name, current_user, db)
+            creation_summary.append(result)
+
+        except Exception as e:
+            creation_summary.append({
+                "file": file_name,
+                "success": False,
+                "message": str(e)
+            })
+        finally:
+            if temp_path and temp_path.exists():
+                temp_path.unlink(missing_ok=True)
+
+    return {"summary": creation_summary}

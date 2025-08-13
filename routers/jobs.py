@@ -3,6 +3,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 
 from pydantic import Json
+from service.activity_service import ActivityHelpers
 from database import get_db
 from models.schemas import (
     JobCreate, JobUpdate, JobResponse, UserResponse, JobStatus,
@@ -191,13 +192,13 @@ async def create_job_step4(
         "salaryMax": basic_info.salaryMax or 0,
         "salaryPeriod": basic_info.salaryPeriod,
         "responsibilities": job_details.keyResponsibilities or [],
-        "requirements": [],  # Add empty requirements array if needed
         "experience": job_details.requiredExperience,
         "teamSize": job_details.teamSize,
         "reportingStructure": job_details.reportingStructure,
         
         # Requirements fields - ensure they're properly mapped
         "skills": requirements.requiredSkills or [],
+        "requirements": requirements.requirements or [],  # Add empty requirements array if needed
         "education": requirements.educationLevel,  # This should save to education field
         "certifications": requirements.certifications or [],
         "softSkills": requirements.softSkills or [],
@@ -244,6 +245,12 @@ async def create_job_step4(
     # Clean up session
     del job_sessions[session_id]
     
+    await ActivityHelpers.log_job_created(
+           user_id=current_user.id,
+           job_id=job.id,
+           job_title=job.title
+       )
+   
     return JobCreationCompleteResponse(
         message="Job created and published successfully",
         job=JobResponse(**job.model_dump()),
@@ -363,7 +370,12 @@ async def update_job(
         where={"id": job_id},
         data=update_data
     )
-
+      # Log activity
+    await ActivityHelpers.log_job_updated(
+       user_id=current_user.id,
+       job_id=job.id,
+       job_title=job.title
+   )
     return JobResponse(**job.dict())
 
 @router.delete("/{job_id}")
@@ -391,7 +403,12 @@ async def delete_job(
     
     # Delete the job from the database
     await db.job.delete(where={"id": job_id})
-
+    # Log activity
+    await ActivityHelpers.log_job_deleted(
+       user_id=current_user.id,
+       job_id=job_id,
+       job_title=existing_job.title
+   )
     return {"message": "Job deleted successfully", "jobId": job_id}
 
 @router.post("/{job_id}/publish")
@@ -409,5 +426,9 @@ async def publish_job(
             "publishedAt": datetime.utcnow()
         }
     )
-    
+    await ActivityHelpers.log_job_published(
+       user_id=current_user.id,
+       job_id=job.id,
+       job_title=job.title
+   )
     return JobResponse(**job.dict())
