@@ -65,8 +65,12 @@ load_dotenv()
 # Constants for resume parsing
 # SERVER = "http://103.99.186.164:11434"
 # MODEL = "qwen2.5vl:7b"
-SERVICE_ACCOUNT_FILE = "hirelnresumes-185cd081b37f.json"
+
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+
+# Load credentials from .env
+creds_info = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
+
 
 openai_model = os.getenv("OPENAI_MODEL", "gpt-4")
 openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -74,7 +78,7 @@ client = openai.OpenAI(api_key=openai_api_key)
 
 # Initialize Google Drive service (global for efficiency)
 try:
-    credentials = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+    credentials = service_account.Credentials.from_service_account_info(creds_info, scopes=SCOPES)
     drive_service = build("drive", "v3", credentials=credentials)
 except Exception as e:
     logger.error(f"Failed to initialize Google Drive service: {e}")
